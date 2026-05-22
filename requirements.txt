@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-google-genai
+google-generativeai
 python-dotenv
 huggingface_hub
 requests
