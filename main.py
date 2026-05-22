@@ -34,21 +34,29 @@ async def ask_gyanamitra(request: ChatRequest):
     
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
+        print("🔴 ERROR: GROQ_API_KEY is missing from Render!")
         raise HTTPException(status_code=500, detail="GROQ_API_KEY is missing!")
 
     try:
         client = Groq(api_key=api_key)
         
-        # Convert frontend array into a single string for the AI
-        user_message = " ".join([str(item) for item in request.formattedContents])
+        # 🚀 NEW: Properly format the chat history for Groq
+        groq_messages = [{"role": "system", "content": request.systemInstruction}]
         
-        print("🟡 2. Sending message to Groq (Llama 3)...")
+        for msg in request.formattedContents:
+            # Change "model" to "assistant" (Groq uses 'assistant', Gemini used 'model')
+            role = "assistant" if msg.get("role") == "model" else "user"
+            
+            # Safely extract the text from the parts array
+            parts = msg.get("parts", [])
+            text = parts[0].get("text", "") if parts else ""
+            
+            groq_messages.append({"role": role, "content": text})
+            
+        print("🟡 2. Sending formatted conversation to Groq...")
         chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": request.systemInstruction},
-                {"role": "user", "content": user_message}
-            ],
-            model="llama3-8b-8192", # Free, fast, and incredibly smart model
+            messages=groq_messages,
+            model="llama3-8b-8192", 
         )
         
         print("🟢 3. SUCCESS: Groq replied!")
@@ -58,7 +66,7 @@ async def ask_gyanamitra(request: ChatRequest):
         print(f"🔴 ERROR from Groq: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🚀 Instant Image Generation via Pollinations (NO API KEY NEEDED)
+# 🚀 Instant Image Generation via Pollinations
 @app.post("/api/generate-image")
 async def generate_image(request: ImageRequest):
     print(f"🎨 Generating image for: {request.prompt}...")
@@ -66,7 +74,6 @@ async def generate_image(request: ImageRequest):
         safe_prompt = urllib.parse.quote(request.prompt)
         seed = random.randint(1, 1000000)
         
-        # Generate URL - No API Key, No waiting, No uploading!
         image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?seed={seed}&width=1024&height=1024&nologo=true"
         
         print("🟢 SUCCESS: Image generated instantly!")
@@ -78,4 +85,4 @@ async def generate_image(request: ImageRequest):
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
-    return {"status": "GyanMitra Server is running on the Startup Stack!"}
+    return {"status": "GyanMitra Server is running perfectly!"}
