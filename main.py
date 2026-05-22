@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
-import google.generativeai as genai
+from groq import Groq
 
 # Load environment variables
 load_dotenv()
@@ -32,42 +32,44 @@ class ImageRequest(BaseModel):
 async def ask_gyanamitra(request: ChatRequest):
     print("\n🟢 1. SUCCESS: Frontend reached Python!")
     
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is missing from Render Environment!")
+        raise HTTPException(status_code=500, detail="GROQ_API_KEY is missing!")
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            system_instruction=request.systemInstruction
+        client = Groq(api_key=api_key)
+        
+        # Convert frontend array into a single string for the AI
+        user_message = " ".join([str(item) for item in request.formattedContents])
+        
+        print("🟡 2. Sending message to Groq (Llama 3)...")
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": request.systemInstruction},
+                {"role": "user", "content": user_message}
+            ],
+            model="llama3-8b-8192", # Free, fast, and incredibly smart model
         )
-        print("🟡 2. Sending message to Gemini...")
-        response = model.generate_content(request.formattedContents)
-        print("🟢 3. SUCCESS: Gemini replied!")
-        return {"text": response.text}
+        
+        print("🟢 3. SUCCESS: Groq replied!")
+        return {"text": chat_completion.choices[0].message.content}
         
     except Exception as e:
-        print(f"🔴 ERROR from Gemini: {str(e)}")
+        print(f"🔴 ERROR from Groq: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🚀 NEW: Instant Image Generation via Pollinations (NO API KEY NEEDED)
+# 🚀 Instant Image Generation via Pollinations (NO API KEY NEEDED)
 @app.post("/api/generate-image")
 async def generate_image(request: ImageRequest):
     print(f"🎨 Generating image for: {request.prompt}...")
     try:
-        # 1. Safely format the prompt for a URL (e.g., changes spaces to %20)
         safe_prompt = urllib.parse.quote(request.prompt)
-        
-        # 2. Generate a random seed so the browser doesn't cache the same image
         seed = random.randint(1, 1000000)
         
-        # 3. Build the Pollinations URL (High quality, 1024x1024, no watermark)
+        # Generate URL - No API Key, No waiting, No uploading!
         image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?seed={seed}&width=1024&height=1024&nologo=true"
         
-        print("🟢 SUCCESS: Image generated instantly via Pollinations!")
-        
-        # 4. Return the URL directly to your React frontend!
+        print("🟢 SUCCESS: Image generated instantly!")
         return {"image_url": image_url}
         
     except Exception as e:
@@ -76,4 +78,4 @@ async def generate_image(request: ImageRequest):
 
 @app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
-    return {"status": "GyanMitra Server is running on the Ultimate Free Stack!"}
+    return {"status": "GyanMitra Server is running on the Startup Stack!"}
