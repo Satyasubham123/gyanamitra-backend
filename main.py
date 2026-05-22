@@ -13,10 +13,15 @@ load_dotenv()
 
 app = FastAPI()
 
+# 🚀 UPDATED: Specific CORS policy to allow your Firebase app
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=False,
+    allow_origins=[
+        "https://gyanamitra-35109.firebaseapp.com",
+        "http://localhost:5173", 
+        "http://localhost:3000"
+    ], 
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -81,7 +86,6 @@ async def generate_image(request: ImageRequest):
         imgbb_key = os.getenv("IMGBB_API_KEY")
         
         with open(temp_filename, "rb") as file:
-            # 🚀 THIS IS THE MAGIC LINE: 259200 seconds = EXACTLY 3 days!
             payload = {
                 "key": imgbb_key,
                 "expiration": 259200 
