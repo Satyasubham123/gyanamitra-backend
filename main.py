@@ -13,11 +13,12 @@ load_dotenv()
 
 app = FastAPI()
 
-# 🚀 UPDATED: Specific CORS policy to allow your Firebase app
+# 🚀 UPDATED: Specific CORS policy to allow your Firebase app AND Render domain
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://gyanamitra-35109.firebaseapp.com",
+        "https://gyanamitra-backend.onrender.com", # Added to fix 404 Preflight
         "http://localhost:5173", 
         "http://localhost:3000"
     ], 
@@ -112,6 +113,7 @@ async def generate_image(request: ImageRequest):
         print(f"🔴 ERROR generating image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/")
+# 🚀 UPDATED: Accept both GET and HEAD requests so Render's health checker stays happy!
+@app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {"status": "GyanMitra Backend is running securely!"}
