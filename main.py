@@ -40,23 +40,20 @@ async def ask_gyanamitra(request: ChatRequest):
     try:
         client = Groq(api_key=api_key)
         
-        # 🚀 NEW: Properly format the chat history for Groq
+        # Properly format the chat history for Groq
         groq_messages = [{"role": "system", "content": request.systemInstruction}]
         
         for msg in request.formattedContents:
-            # Change "model" to "assistant" (Groq uses 'assistant', Gemini used 'model')
             role = "assistant" if msg.get("role") == "model" else "user"
-            
-            # Safely extract the text from the parts array
             parts = msg.get("parts", [])
             text = parts[0].get("text", "") if parts else ""
-            
             groq_messages.append({"role": role, "content": text})
             
         print("🟡 2. Sending formatted conversation to Groq...")
         chat_completion = client.chat.completions.create(
             messages=groq_messages,
-            model="llama3-8b-8192", 
+            # 🚀 THIS IS THE FIX: Upgraded to the new 3.1 model!
+            model="llama-3.1-8b-instant", 
         )
         
         print("🟢 3. SUCCESS: Groq replied!")
