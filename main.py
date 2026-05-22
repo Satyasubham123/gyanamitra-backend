@@ -13,16 +13,12 @@ load_dotenv()
 
 app = FastAPI()
 
-# 🚀 UPDATED: Specific CORS policy to allow your Firebase app AND Render domain
+# ☢️ THE NUCLEAR CORS FIX ☢️
+# This completely disables CORS blocking by allowing ALL websites
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://gyanamitra-35109.firebaseapp.com",
-        "https://gyanamitra-backend.onrender.com", # Added to fix 404 Preflight
-        "http://localhost:5173", 
-        "http://localhost:3000"
-    ], 
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow absolutely everything
+    allow_credentials=False, # MUST be False when using "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -35,7 +31,6 @@ try:
     )
 except Exception as e:
     print(f"Warning: Hugging Face client failed to initialize: {e}")
-
 
 class ChatRequest(BaseModel):
     formattedContents: list
@@ -70,7 +65,7 @@ async def ask_gyanamitra(request: ChatRequest):
         print(f"🔴 ERROR from Google SDK: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🚀 AI Image Generation Route (ImgBB Auto-Delete System)
+# 🚀 AI Image Generation Route
 @app.post("/api/generate-image")
 async def generate_image(request: ImageRequest):
     print(f"🎨 Generating image for: {request.prompt}...")
@@ -82,7 +77,7 @@ async def generate_image(request: ImageRequest):
         temp_filename = f"temp_visual_{uuid.uuid4()}.png"
         image.save(temp_filename)
         
-        # 3. Upload to ImgBB with the 3-day self-destruct timer
+        # 3. Upload to ImgBB
         print("☁️ Uploading to ImgBB (Auto-deletes in 3 days)...")
         imgbb_key = os.getenv("IMGBB_API_KEY")
         
@@ -96,14 +91,14 @@ async def generate_image(request: ImageRequest):
             }
             response = requests.post("https://api.imgbb.com/1/upload", data=payload, files=files)
             
-        # 4. Get the URL from ImgBB's response
+        # 4. Get the URL
         if response.status_code == 200:
             image_url = response.json()["data"]["url"]
         else:
             print(f"ImgBB Error: {response.text}")
             raise Exception("Failed to upload image to cloud storage.")
             
-        # 5. Clean up the temporary server file to save space
+        # 5. Clean up
         os.remove(temp_filename)
         
         print("🟢 SUCCESS: Image generated and uploaded!")
@@ -113,7 +108,6 @@ async def generate_image(request: ImageRequest):
         print(f"🔴 ERROR generating image: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 🚀 UPDATED: Accept both GET and HEAD requests so Render's health checker stays happy!
 @app.api_route("/", methods=["GET", "HEAD"])
 def read_root():
     return {"status": "GyanMitra Backend is running securely!"}
