@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
-import google.generativeai as genai
+from google import genai # 🚀 UPDATED IMPORT
 
 # Load environment variables (from Render dashboard)
 load_dotenv()
@@ -52,8 +52,8 @@ def generate_with_fallbacks(system_instruction: str, history: list) -> str:
     # 🛡️ Try 2: Gemini (Fallback 1 - Best for Indic Languages)
     try:
         print("🟡 Trying Gemini...")
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # 🚀 UPDATED GEMINI CODE
+        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
         
         # Convert Groq history format to Gemini format
         gemini_prompt = system_instruction + "\n\n"
@@ -62,7 +62,10 @@ def generate_with_fallbacks(system_instruction: str, history: list) -> str:
             text = msg.get("parts", [{}])[0].get("text", "")
             gemini_prompt += f"{role}: {text}\n"
             
-        res = model.generate_content(gemini_prompt)
+        res = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=gemini_prompt
+        )
         return res.text
         
     except Exception as e:

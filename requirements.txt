@@ -3,5 +3,5 @@ uvicorn
 pydantic
 python-dotenv
 groq
-google-generativeai
+google-genai
 requests
