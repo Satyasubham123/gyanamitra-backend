@@ -5,3 +5,4 @@ python-dotenv
 groq
 google-genai
 requests
+firebase-admin
