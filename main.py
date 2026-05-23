@@ -1,7 +1,8 @@
 import os
+import json
 import urllib.parse
 import random
-import requests
+import hashlib
 import base64
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,10 +16,24 @@ from firebase_admin import credentials, firestore
 
 load_dotenv()
 
-# Initialize Firebase Admin for Caching (You will need to add your serviceAccountKey.json later)
-# cred = credentials.Certificate("serviceAccountKey.json")
-# firebase_admin.initialize_app(cred)
-# db = firestore.client()
+# --- INITIALIZE FIREBASE ADMIN SAFELY ---
+firebase_app = None
+if not firebase_admin._apps:
+    # Read the JSON string from Render Environment Variables
+    service_account_info = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+    if service_account_info:
+        try:
+            cred_dict = json.loads(service_account_info)
+            cred = credentials.Certificate(cred_dict)
+            firebase_app = firebase_admin.initialize_app(cred)
+            db = firestore.client()
+            print("✅ Firebase Admin Initialized Successfully")
+        except Exception as e:
+            print(f"⚠️ Error initializing Firebase Admin: {e}")
+            db = None
+    else:
+        print("⚠️ WARNING: FIREBASE_SERVICE_ACCOUNT env var not found. Caching will be disabled.")
+        db = None
 
 app = FastAPI()
 
@@ -81,33 +96,55 @@ def process_educational_ai(english_prompt: str, history: list) -> str:
         print(f"Gemini failed: {e}")
         raise Exception("All AI providers failed.")
 
+# Helper to generate a unique hash for caching
+def generate_cache_key(text: str) -> str:
+    return hashlib.md5(text.lower().strip().encode()).hexdigest()
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
     try:
-        # Step 1: Check Cache (Pseudocode for future Firestore implementation)
-        # cache_ref = db.collection('ai_cache').document(hash(request.prompt))
-        # if cache_ref.get().exists: return {"text": cache_ref.get().to_dict()['response']}
-
-        # Step 2: Translate Input to English (if needed)
+        # 1. Translate Input to English (The Universal Language)
         english_prompt = request.prompt
         if request.targetLanguage != 'English':
             english_prompt = translate_text(request.prompt, 'English')
 
-        # Step 3: Process with Educational AI Fallback System
+        # 2. CHECK CACHE FIRST!
+        cache_key = generate_cache_key(english_prompt)
+        if db is not None:
+            cache_ref = db.collection('ai_global_cache').document(cache_key)
+            cached_doc = cache_ref.get()
+            
+            if cached_doc.exists:
+                print(f"🚀 CACHE HIT! Returning saved answer for: {english_prompt}")
+                english_response = cached_doc.to_dict().get('response')
+                
+                # We still translate the cached english response back to their selected language!
+                final_response = english_response
+                if request.targetLanguage != 'English':
+                    final_response = translate_text(english_response, request.targetLanguage)
+                return {"text": final_response}
+
+        print("🐢 CACHE MISS. Generating new answer from AI...")
+        # 3. Process with Educational AI Fallback System
         english_response = process_educational_ai(english_prompt, request.history)
 
-        # Step 4: Translate Back to Student's Language
+        # 4. SAVE TO CACHE FOR NEXT TIME
+        if db is not None:
+            cache_ref.set({
+                "prompt": english_prompt,
+                "response": english_response,
+                "timestamp": firestore.SERVER_TIMESTAMP
+            })
+
+        # 5. Translate Back to Student's Language
         final_response = english_response
         if request.targetLanguage != 'English':
             final_response = translate_text(english_response, request.targetLanguage)
 
-        # Step 5: Save to Cache (Pseudocode)
-        # cache_ref.set({"prompt": request.prompt, "response": final_response})
-
         return {"text": final_response}
 
     except Exception as e:
+        print(f"Chat API Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate-image")
