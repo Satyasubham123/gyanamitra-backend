@@ -2,12 +2,14 @@ import os
 import urllib.parse
 import random
 import requests
+import base64
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
 from google import genai
+from google.genai import types # Added to handle image bytes for Vision API
 import firebase_admin
 from firebase_admin import credentials, firestore
 
@@ -36,6 +38,11 @@ class ChatRequest(BaseModel):
 class ImageRequest(BaseModel):
     prompt: str
     subject: str
+
+class AnalyzeRequest(BaseModel):
+    image_base64: str
+    prompt: str
+    targetLanguage: str
 
 # --- AI ENGINES ---
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -107,7 +114,6 @@ async def chat_endpoint(request: ChatRequest):
 async def generate_image(request: ImageRequest):
     try:
         # 1. Supercharge the prompt for educational clarity
-        # We force "vector graphic" and "readable text" to get clean lines instead of blurry paintings.
         full_prompt = f"High resolution crisp educational vector graphic diagram of {request.subject}, {request.prompt}. Clean white background, highly detailed, sharp lines. PERFECTLY READABLE ENGLISH TEXT, clear labels."
         
         safe_prompt = urllib.parse.quote(full_prompt)
@@ -120,6 +126,51 @@ async def generate_image(request: ImageRequest):
     except Exception as e:
         print(f"Image generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/analyze-image")
+async def analyze_image_endpoint(request: AnalyzeRequest):
+    try:
+        # 1. Clean the base64 string (remove 'data:image/jpeg;base64,' if present)
+        encoded_data = request.image_base64
+        mime_type = "image/jpeg"
+        if "," in request.image_base64:
+            header, encoded_data = request.image_base64.split(",", 1)
+            mime_type = header.split(":")[1].split(";")[0]
+            
+        image_bytes = base64.b64decode(encoded_data)
+
+        # 2. Translate Prompt to English (if it's in Odia/Hindi)
+        english_prompt = request.prompt
+        if request.targetLanguage != 'English' and request.prompt.strip():
+            english_prompt = translate_text(request.prompt, 'English')
+
+        # 3. Create Educational Vision Prompt
+        system_instruction = """You are GyanMitra, an expert AI tutor. Analyze the uploaded image carefully. 
+        - If it's a diagram, explain its parts clearly. 
+        - If it's a math/science problem, solve it step-by-step. 
+        - If it's handwritten notes, transcribe and summarize them."""
+        
+        full_prompt = f"{system_instruction}\n\nStudent asks: {english_prompt if english_prompt else 'Please explain this image.'}"
+
+        # 4. Send to Gemini 2.5 Flash Vision
+        image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
+        res = gemini_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[full_prompt, image_part]
+        )
+        
+        english_response = res.text
+
+        # 5. Translate Response back to Student's Language
+        final_response = english_response
+        if request.targetLanguage != 'English':
+            final_response = translate_text(english_response, request.targetLanguage)
+
+        return {"text": final_response}
+
+    except Exception as e:
+        print(f"Vision API Error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze image.")
 
 @app.get("/")
 def read_root():
