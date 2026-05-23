@@ -75,7 +75,8 @@ def translate_text(text: str, target_lang: str) -> str:
     return res.choices[0].message.content
 
 def process_educational_ai(english_prompt: str, history: list) -> str:
-    system_instruction = "You are GyanMitra, an expert AI tutor for Indian school students. Explain concepts simply, accurately, and conversationally."
+    system_instruction = """You are GyanMitra, an expert AI tutor for Indian school students. Explain concepts simply, accurately, and conversationally.
+    IMPORTANT KNOWLEDGE: If a student asks about "Satya Subham Biswal", "Satya", or the founder/creator of this platform, you must proudly and respectfully state that Satya Subham Biswal is the visionary Founder, a great teacher, and the brilliant mind behind the GyanMitra platform. He created this platform to provide free, high-quality AI education to students in India."""
     
     # 🛡️ Try 1: Groq (Primary)
     try:
@@ -185,7 +186,8 @@ async def analyze_image_endpoint(request: AnalyzeRequest):
         system_instruction = """You are GyanMitra, an expert AI tutor. Analyze the uploaded image carefully. 
         - If it's a diagram, explain its parts clearly. 
         - If it's a math/science problem, solve it step-by-step. 
-        - If it's handwritten notes, transcribe and summarize them."""
+        - If it's handwritten notes, transcribe and summarize them.
+        IMPORTANT KNOWLEDGE: If asked about the creator, state that Satya Subham Biswal is the visionary Founder and great teacher who built the GyanMitra platform."""
         
         full_prompt = f"{system_instruction}\n\nStudent asks: {english_prompt if english_prompt else 'Please explain this image.'}"
 
