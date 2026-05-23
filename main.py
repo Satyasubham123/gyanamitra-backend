@@ -7,10 +7,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
-from google import genai # 🚀 UPDATED IMPORT
+from google import genai
+import firebase_admin
+from firebase_admin import credentials, firestore
 
-# Load environment variables (from Render dashboard)
 load_dotenv()
+
+# Initialize Firebase Admin for Caching (You will need to add your serviceAccountKey.json later)
+# cred = credentials.Certificate("serviceAccountKey.json")
+# firebase_admin.initialize_app(cred)
+# db = firestore.client()
 
 app = FastAPI()
 
@@ -23,103 +29,98 @@ app.add_middleware(
 )
 
 class ChatRequest(BaseModel):
-    formattedContents: list
-    systemInstruction: str
+    prompt: str
+    targetLanguage: str # 'English', 'Odia', 'Hindi'
+    history: list
 
 class ImageRequest(BaseModel):
     prompt: str
     subject: str
 
-# --- THE ULTIMATE FALLBACK MANAGER ---
-def generate_with_fallbacks(system_instruction: str, history: list) -> str:
-    # 🛡️ Try 1: Groq (Primary Engine - Fastest)
-    try:
-        print("🟡 Trying Groq...")
-        groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        groq_messages = [{"role": "system", "content": system_instruction}]
-        
-        for msg in history:
-            role = "assistant" if msg.get("role") == "model" else "user"
-            text = msg.get("parts", [{}])[0].get("text", "")
-            groq_messages.append({"role": role, "content": text})
-            
-        res = groq_client.chat.completions.create(model="llama-3.1-8b-instant", messages=groq_messages)
-        return res.choices[0].message.content
-        
-    except Exception as e:
-        print(f"🔴 Groq Failed: {e}. Switching to Gemini...")
+# --- AI ENGINES ---
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+gemini_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-    # 🛡️ Try 2: Gemini (Fallback 1 - Best for Indic Languages)
+def translate_text(text: str, target_lang: str) -> str:
+    if target_lang.lower() == 'english': return text
+    
+    # Use Groq (Llama 3) for blazing fast, free translation
+    sys_prompt = f"You are a professional translator. Translate the following text into {target_lang}. Output ONLY the translated text, nothing else."
+    res = groq_client.chat.completions.create(
+        model="llama-3.1-8b-instant",
+        messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": text}]
+    )
+    return res.choices[0].message.content
+
+def process_educational_ai(english_prompt: str, history: list) -> str:
+    system_instruction = "You are GyanMitra, an expert AI tutor for Indian school students. Explain concepts simply, accurately, and conversationally."
+    
+    # 🛡️ Try 1: Groq (Primary)
     try:
-        print("🟡 Trying Gemini...")
-        # 🚀 UPDATED GEMINI CODE
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        
-        # Convert Groq history format to Gemini format
-        gemini_prompt = system_instruction + "\n\n"
-        for msg in history:
-            role = "AI" if msg.get("role") == "model" else "User"
-            text = msg.get("parts", [{}])[0].get("text", "")
-            gemini_prompt += f"{role}: {text}\n"
-            
-        res = client.models.generate_content(
+        messages = [{"role": "system", "content": system_instruction}, {"role": "user", "content": english_prompt}]
+        res = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages)
+        return res.choices[0].message.content
+    except Exception as e:
+        print(f"Groq failed: {e}")
+
+    # 🛡️ Try 2: Gemini (Fallback)
+    try:
+        res = gemini_client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=gemini_prompt
+            contents=system_instruction + "\nUser: " + english_prompt
         )
         return res.text
-        
     except Exception as e:
-        print(f"🔴 Gemini Failed: {e}. Switching to OpenRouter...")
+        print(f"Gemini failed: {e}")
+        raise Exception("All AI providers failed.")
 
-    # 🛡️ Try 3: OpenRouter (Ultimate Fallback - Safety Net)
+
+@app.post("/api/chat")
+async def chat_endpoint(request: ChatRequest):
     try:
-        print("🟡 Trying OpenRouter...")
-        openrouter_key = os.getenv("OPENROUTER_API_KEY")
-        or_messages = [{"role": "system", "content": system_instruction}]
-        
-        for msg in history:
-            role = "assistant" if msg.get("role") == "model" else "user"
-            text = msg.get("parts", [{}])[0].get("text", "")
-            or_messages.append({"role": role, "content": text})
-            
-        headers = {
-            "Authorization": f"Bearer {openrouter_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://gyanamitra.com",
-            "X-Title": "GyanMitra"
-        }
-        payload = {"model": "google/gemma-2-9b-it:free", "messages": or_messages}
-        req = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-        
-        return req.json()["choices"][0]["message"]["content"]
-        
-    except Exception as e:
-        print(f"🔴 OpenRouter Failed: {e}")
-        raise HTTPException(status_code=500, detail="All AI providers failed. Please try again later.")
+        # Step 1: Check Cache (Pseudocode for future Firestore implementation)
+        # cache_ref = db.collection('ai_cache').document(hash(request.prompt))
+        # if cache_ref.get().exists: return {"text": cache_ref.get().to_dict()['response']}
 
+        # Step 2: Translate Input to English (if needed)
+        english_prompt = request.prompt
+        if request.targetLanguage != 'English':
+            english_prompt = translate_text(request.prompt, 'English')
 
-# --- API ENDPOINTS ---
-@app.post("/ask")
-async def ask_gyanamitra(request: ChatRequest):
-    try:
-        answer = generate_with_fallbacks(request.systemInstruction, request.formattedContents)
-        return {"text": answer}
+        # Step 3: Process with Educational AI Fallback System
+        english_response = process_educational_ai(english_prompt, request.history)
+
+        # Step 4: Translate Back to Student's Language
+        final_response = english_response
+        if request.targetLanguage != 'English':
+            final_response = translate_text(english_response, request.targetLanguage)
+
+        # Step 5: Save to Cache (Pseudocode)
+        # cache_ref.set({"prompt": request.prompt, "response": final_response})
+
+        return {"text": final_response}
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate-image")
 async def generate_image(request: ImageRequest):
     try:
-        # Combine subject and prompt natively for Pollinations
-        full_prompt = f"Highly detailed educational diagram of {request.subject}, {request.prompt}, clean white background, digital art"
+        # 1. Supercharge the prompt for educational clarity
+        # We force "vector graphic" and "readable text" to get clean lines instead of blurry paintings.
+        full_prompt = f"High resolution crisp educational vector graphic diagram of {request.subject}, {request.prompt}. Clean white background, highly detailed, sharp lines. PERFECTLY READABLE ENGLISH TEXT, clear labels."
+        
         safe_prompt = urllib.parse.quote(full_prompt)
         seed = random.randint(1, 1000000)
         
-        image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?seed={seed}&width=1024&height=1024&nologo=true"
+        # 2. Add '&model=flux' to the URL! This is the secret weapon for good text.
+        image_url = f"https://image.pollinations.ai/prompt/{safe_prompt}?seed={seed}&width=1024&height=1024&nologo=true&model=flux"
+        
         return {"image_url": image_url}
     except Exception as e:
+        print(f"Image generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.api_route("/", methods=["GET", "HEAD"])
+@app.get("/")
 def read_root():
-    return {"status": "GyanMitra Multi-Provider Backend is LIVE!"}
+    return {"status": "GyanMitra Backend is Running"}
