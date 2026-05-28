@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer # 🚀 Add this line
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional # 🚀 Added this import
@@ -60,6 +61,7 @@ Base.metadata.create_all(bind=engine)
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-this-later") 
 ALGORITHM = "HS256"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
 # Dependency to open a database connection for each API request
 def get_db():
@@ -466,6 +468,75 @@ async def analyze_image_endpoint(request: AnalyzeRequest):
     except Exception as e:
         print(f"Vision API Error: {e}")
         raise HTTPException(status_code=500, detail="Failed to analyze image.")
+
+# --- SECURE PROFILE DEPENDENCY ---
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    try:
+        # 1. Decode the token to get the email
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if email is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired. Please log in again.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # 2. Find the user in the database
+    user = db.query(User).filter(User.email == email).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return user
+
+# --- GET CURRENT USER PROFILE ENDPOINT ---
+@app.get("/api/users/me")
+async def read_users_me(current_user: User = Depends(get_current_user)):
+    # This automatically runs the token check above!
+    # If the token is valid, it returns the user's full database row.
+    return {
+        "email": current_user.email,
+        "firstName": current_user.first_name,
+        "middleName": current_user.middle_name,
+        "lastName": current_user.last_name,
+        "classLevel": current_user.class_level,
+        "state": current_user.state,
+        "medium": current_user.medium,
+        "gender": current_user.gender,
+        "role": current_user.role,
+        "is_verified": current_user.is_verified,
+        # Create a nice display name combining first and last name
+        "displayName": f"{current_user.first_name} {current_user.last_name}".strip()
+    }
+
+# --- ADMIN SECURITY LOCK ---
+async def get_admin_user(current_user: User = Depends(get_current_user)):
+    # Block anyone who isn't an admin!
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Authorized Admin Personnel only.")
+    return current_user
+
+# --- GET ALL STUDENTS (ADMIN ONLY) ---
+@app.get("/api/admin/users")
+async def get_all_users(admin: User = Depends(get_admin_user), db: Session = Depends(get_db)):
+    # This queries the SQLite database for every single user row
+    users = db.query(User).all()
+    
+    # Format the data neatly to send to React
+    student_list = []
+    for u in users:
+        student_list.append({
+            "id": u.id,
+            "email": u.email,
+            "firstName": u.first_name,
+            "lastName": u.last_name,
+            "classLevel": u.class_level,
+            "state": u.state,
+            "role": u.role,
+            "is_verified": u.is_verified
+        })
+        
+    return student_list
 
 @app.get("/")
 def read_root():
