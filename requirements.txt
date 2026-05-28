@@ -1,8 +1,11 @@
 fastapi
 uvicorn
+passlib[bcrypt]
+pyjwt
 pydantic
-python-dotenv
-groq
-google-genai
+sqlalchemy
 requests
 firebase-admin
+google-genai
+groq
+python-dotenv
