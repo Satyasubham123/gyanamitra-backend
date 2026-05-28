@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker, Session
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Optional # 🚀 Added this import
 from dotenv import load_dotenv
 from groq import Groq
 from google import genai
@@ -34,13 +35,23 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Define the SQL User Table (Now includes is_verified)
+# Define the SQL User Table (Now with full profile fields!)
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     is_verified = Column(Boolean, default=False) 
+    
+    # 🚀 New Profile Columns
+    first_name = Column(String)
+    middle_name = Column(String, nullable=True)
+    last_name = Column(String)
+    class_level = Column(String)
+    state = Column(String)
+    medium = Column(String)
+    gender = Column(String)
+    role = Column(String, default="student")
 
 # Create the tables in the local SQLite database
 Base.metadata.create_all(bind=engine)
@@ -148,9 +159,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 🚀 Updated Pydantic Model (What React sends to Python)
 class UserCreate(BaseModel):
     email: str
     password: str
+    firstName: str
+    middleName: Optional[str] = None
+    lastName: str
+    classLevel: str
+    state: str
+    medium: str
+    gender: str
+    role: str = "student"
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -222,7 +242,21 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     hashed_pw = pwd_context.hash(user.password)
-    new_user = User(email=user.email, hashed_password=hashed_pw)
+    
+    # 🚀 Save ALL the profile data into the database!
+    new_user = User(
+        email=user.email, 
+        hashed_password=hashed_pw,
+        first_name=user.firstName,
+        middle_name=user.middleName,
+        last_name=user.lastName,
+        class_level=user.classLevel,
+        state=user.state,
+        medium=user.medium,
+        gender=user.gender,
+        role=user.role
+    )
+    
     db.add(new_user)
     db.commit()
     
@@ -435,4 +469,4 @@ async def analyze_image_endpoint(request: AnalyzeRequest):
 
 @app.get("/")
 def read_root():
-    return {"status": "GyanMitra Backend is Running with Email Auth!"}
+    return {"status": "GyanMitra Backend is Running with Email Auth and User Profiles!"}
