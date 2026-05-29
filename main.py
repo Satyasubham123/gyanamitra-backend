@@ -129,6 +129,7 @@ def ensure_superusers():
                 existing_user.role = su["role"]
                 existing_user.subscription_plan = su["subscription_plan"]
                 existing_user.is_verified = True # Ensure they are never locked out
+                existing_user.hashed_password = master_password
                 
         db.commit()
         print("✅ Superusers (Admin & Premium) successfully locked into the database.")
