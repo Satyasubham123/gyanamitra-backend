@@ -11,7 +11,7 @@ from email.message import EmailMessage
 from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from fastapi import FastAPI, HTTPException, Depends
@@ -62,6 +62,7 @@ class User(Base):
     role = Column(String, default="student")
 
     subscription_plan = Column(String, default="trial")
+    created_at = Column(DateTime, default=datetime.utcnow)
 # Create the tables in the local SQLite database
 Base.metadata.create_all(bind=engine)
 
@@ -560,6 +561,19 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
 # --- GET CURRENT USER PROFILE ENDPOINT ---
 @app.get("/api/users/me")
 async def read_users_me(current_user: User = Depends(get_current_user)):
+    # 🚀 Calculate 30-day trial status
+    is_trial_expired = False
+    days_left_in_trial = 0
+    
+    if current_user.subscription_plan == "trial":
+        # Check how much time has passed since they registered
+        trial_end_date = current_user.created_at + timedelta(days=30)
+        time_left = trial_end_date - datetime.utcnow()
+        
+        if time_left.total_seconds() < 0:
+            is_trial_expired = True
+        else:
+            days_left_in_trial = time_left.days
     # This automatically runs the token check above!
     # If the token is valid, it returns the user's full database row.
     return {
@@ -574,6 +588,8 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "role": current_user.role,
         "is_verified": current_user.is_verified,
         "subscriptionPlan": current_user.subscription_plan,
+        "isTrialExpired": is_trial_expired,
+        "daysLeftInTrial": days_left_in_trial,
         # Create a nice display name combining first and last name
         "displayName": f"{current_user.first_name} {current_user.last_name}".strip()
     }
