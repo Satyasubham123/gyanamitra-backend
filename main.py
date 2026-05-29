@@ -18,9 +18,10 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer # 🚀 Add this line
 from fastapi.middleware.cors import CORSMiddleware
 origins = [
-    "http://localhost:5173",          # For local testing
     "https://satyagyana.web.app",     # YOUR LIVE FRONTEND
-    "https://satyagyana.firebaseapp.com" # Alternative Firebase link
+    "https://satyagyana.firebaseapp.com",
+    "http://localhost:5173", 
+    "http://localhost:3000" # Alternative Firebase link
 ]
 from pydantic import BaseModel
 from typing import Optional # 🚀 Added this import
@@ -30,6 +31,7 @@ from google import genai
 from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
+
 
 load_dotenv()
 
