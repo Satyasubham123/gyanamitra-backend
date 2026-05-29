@@ -12,19 +12,12 @@ from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.security import OAuth2PasswordBearer # 🚀 Add this line
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
-origins = [
-    "https://satyagyana.web.app",     # YOUR LIVE FRONTEND
-    "https://satyagyana.firebaseapp.com",
-    "http://localhost:5173", 
-    "http://localhost:3000" # Alternative Firebase link
-]
 from pydantic import BaseModel
-from typing import Optional # 🚀 Added this import
+from typing import Optional
 from dotenv import load_dotenv
 from groq import Groq
 from google import genai
@@ -32,26 +25,36 @@ from google.genai import types
 import firebase_admin
 from firebase_admin import credentials, firestore
 
-
 load_dotenv()
 
+origins = [
+    "https://satyagyana.web.app",     # YOUR LIVE FRONTEND
+    "https://satyagyana.firebaseapp.com",
+    "http://localhost:5173", 
+    "http://localhost:3000"           # Alternative Firebase link
+]
+
 # ==========================================
-# 1. AUTHENTICATION & DATABASE SETUP (SQLITE)
+# 1. AUTHENTICATION & DATABASE SETUP
 # ==========================================
-SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db" 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./users.db")
+if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Define the SQL User Table (Now with full profile fields!)
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     is_verified = Column(Boolean, default=False) 
-    
-    # 🚀 New Profile Columns
     first_name = Column(String)
     middle_name = Column(String, nullable=True)
     last_name = Column(String)
@@ -60,11 +63,23 @@ class User(Base):
     medium = Column(String)
     gender = Column(String)
     role = Column(String, default="student")
-
     subscription_plan = Column(String, default="trial")
     created_at = Column(DateTime, default=datetime.utcnow)
-# Create the tables in the local SQLite database
+
 Base.metadata.create_all(bind=engine)
+
+# Setup Password Hashing and JWT (Must be BEFORE ensure_superusers)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-this-later") 
+ALGORITHM = "HS256"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 def ensure_superusers():
     db = SessionLocal()
@@ -123,19 +138,6 @@ def ensure_superusers():
 
 # Run the function every time the server starts
 ensure_superusers()
-# Setup Password Hashing and JWT
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-this-later") 
-ALGORITHM = "HS256"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
-
-# Dependency to open a database connection for each API request
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # ==========================================
@@ -227,7 +229,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🚀 Updated Pydantic Model (What React sends to Python)
 class UserCreate(BaseModel):
     email: str
     password: str
@@ -239,6 +240,7 @@ class UserCreate(BaseModel):
     medium: str
     gender: str
     role: str = "student"
+
 class UserLogin(BaseModel):
     email: str
     password: str
@@ -314,7 +316,6 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     
     hashed_pw = pwd_context.hash(user.password)
     
-    # 🚀 Save ALL the profile data into the database!
     new_user = User(
         email=user.email, 
         hashed_password=hashed_pw,
@@ -574,6 +575,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
             is_trial_expired = True
         else:
             days_left_in_trial = time_left.days
+            
     # This automatically runs the token check above!
     # If the token is valid, it returns the user's full database row.
     return {
