@@ -1,3 +1,4 @@
 {
-    "python.defaultInterpreterPath": "D:\\GyanMitra-Backend\\venv\\Scripts\\python.exe"
+    "python.defaultInterpreterPath": "D:\\GyanMitra-Backend\\venv\\Scripts\\python.exe",
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

@@ -1,5 +1,4 @@
 import os
-import resend
 import json
 import json as pyjson
 import urllib.parse
@@ -8,7 +7,8 @@ import hashlib
 import base64
 import requests 
 import smtplib
-from email.message import EmailMessage
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 import jwt
 from passlib.context import CryptContext
@@ -144,40 +144,47 @@ ensure_superusers()
 
 
 # ==========================================
-# 2. EMAIL VERIFICATION HELPER
+# 2. EMAIL VERIFICATION HELPER (GMAIL SMTP)
 # ==========================================
-# ==========================================
-# 2. EMAIL VERIFICATION HELPER
-# ==========================================
-
-# 🚀 Initialize Resend API
-resend.api_key = os.getenv("RESEND_API_KEY")
 
 def send_verification_email(user_email: str, token: str):
-    # 🚀 Changed from localhost to your LIVE website URL!
     verify_link = f"https://satyagyana.web.app/verify?token={token}"
     
+    sender_email = os.getenv("GMAIL_ADDRESS")
+    sender_password = os.getenv("GMAIL_APP_PASSWORD")
+
+    if not sender_email or not sender_password:
+        print("⚠️ ERROR: GMAIL_ADDRESS or GMAIL_APP_PASSWORD missing from environment variables!")
+        return False
+
+    msg = MIMEMultipart()
+    msg['From'] = f"GyanMitra <{sender_email}>"
+    msg['To'] = user_email
+    msg['Subject'] = "Verify your GyanMitra Access Node"
+
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+        <h2 style="color: #1e293b;">Welcome to GyanMitra!</h2>
+        <p style="color: #475569; font-size: 16px;">We are thrilled to have you. Please click the button below to verify your email address and activate your account:</p>
+        <br>
+        <a href='{verify_link}' style='display: inline-block; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;'>Verify My Account</a>
+        <br><br>
+        <p style="color: #64748b; font-size: 12px;">Or paste this link securely into your browser:<br> {verify_link}</p>
+    </div>
+    """
+    msg.attach(MIMEText(html_content, 'html'))
+
     try:
-        params = {
-            "from": "GyanMitra <onboarding@resend.dev>",
-            "to": [user_email],
-            "reply_to": "satyagyanaedu@gmail.com",  # 🚀 Replies go straight to your Gmail
-            "subject": "Verify your GyanMitra Access Node",
-            "html": f"""
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
-                <h2 style="color: #1e293b;">Welcome to GyanMitra!</h2>
-                <p style="color: #475569; font-size: 16px;">We are thrilled to have you. Please click the button below to verify your email address and activate your account:</p>
-                <br>
-                <a href='{verify_link}' style='display: inline-block; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;'>Verify My Account</a>
-                <br><br>
-                <p style="color: #64748b; font-size: 12px;">Or paste this link securely into your browser:<br> {verify_link}</p>
-            </div>
-            """
-        }
-        resend.Emails.send(params)
-        print(f"✅ Real verification email dispatched to {user_email}")
+        # Securely connect to Gmail's server and send the email
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, sender_password)
+            server.send_message(msg)
+            print(f"✅ Real verification email securely dispatched to {user_email} via Gmail")
+            return True
     except Exception as e:
-        print(f"⚠️ Failed to send via Resend: {str(e)}")
+        print(f"⚠️ Failed to send via Gmail SMTP: {str(e)}")
+        return False
+
 
 # ==========================================
 # 3. FIREBASE & SUPABASE SETUP
@@ -335,7 +342,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     expire = datetime.utcnow() + timedelta(hours=24)
     verify_token = jwt.encode({"sub": user.email, "type": "verify", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     
-    # Send the email via Gmail App Password
+    # Send the email via Gmail SMTP
     send_verification_email(user.email, verify_token)
     
     return {"msg": "User registered successfully! Please check your email to verify your account."}
