@@ -180,6 +180,9 @@ class UserCreate(BaseModel):
     medium: str
     gender: str
     role: str = "student"
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -305,7 +308,7 @@ async def verify_email(token: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Invalid verification link")
 
 @app.post("/api/login")
-async def login(user: UserCreate, db: Session = Depends(get_db)):
+async def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.email == user.email).first()
     
     if not db_user or not pwd_context.verify(user.password, db_user.hashed_password):
