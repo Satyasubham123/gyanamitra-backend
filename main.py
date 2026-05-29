@@ -1,4 +1,5 @@
 import os
+import resend
 import json
 import json as pyjson
 import urllib.parse
@@ -145,42 +146,38 @@ ensure_superusers()
 # ==========================================
 # 2. EMAIL VERIFICATION HELPER
 # ==========================================
+# ==========================================
+# 2. EMAIL VERIFICATION HELPER
+# ==========================================
+
+# 🚀 Initialize Resend API
+resend.api_key = os.getenv("RESEND_API_KEY")
+
 def send_verification_email(user_email: str, token: str):
-    # This is the link the user will click in their email
-    # Update localhost to your real domain when you deploy!
-    verify_link = f"http://localhost:5173/verify?token={token}"
+    # 🚀 Changed from localhost to your LIVE website URL!
+    verify_link = f"https://satyagyana.web.app/verify?token={token}"
     
-    sender_email = os.getenv("EMAIL_ADDRESS")
-    app_password = os.getenv("EMAIL_APP_PASSWORD")
-
-    if not sender_email or not app_password:
-        print("⚠️ Email credentials not found in .env! Cannot send verification email.")
-        return
-
-    msg = EmailMessage()
-    msg['Subject'] = 'Welcome to GyanMitra! Please verify your email'
-    msg['From'] = sender_email
-    msg['To'] = user_email
-    
-    email_body = f"""Hello!
-
-Welcome to the GyanMitra platform. We are thrilled to have you!
-
-Please click the link below to verify your email address and activate your account:
-{verify_link}
-
-If you did not request this, please ignore this email.
-"""
-    msg.set_content(email_body)
-
     try:
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-            smtp.login(sender_email, app_password)
-            smtp.send_message(msg)
-            print(f"✅ Verification email sent successfully to {user_email}")
+        params = {
+            "from": "GyanMitra <onboarding@resend.dev>",
+            "to": [user_email],
+            "reply_to": "satyagyanaedu@gmail.com",  # 🚀 Replies go straight to your Gmail
+            "subject": "Verify your GyanMitra Access Node",
+            "html": f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+                <h2 style="color: #1e293b;">Welcome to GyanMitra!</h2>
+                <p style="color: #475569; font-size: 16px;">We are thrilled to have you. Please click the button below to verify your email address and activate your account:</p>
+                <br>
+                <a href='{verify_link}' style='display: inline-block; padding: 12px 24px; background-color: #2563EB; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;'>Verify My Account</a>
+                <br><br>
+                <p style="color: #64748b; font-size: 12px;">Or paste this link securely into your browser:<br> {verify_link}</p>
+            </div>
+            """
+        }
+        resend.Emails.send(params)
+        print(f"✅ Real verification email dispatched to {user_email}")
     except Exception as e:
-        print(f"⚠️ Failed to send verification email: {e}")
-
+        print(f"⚠️ Failed to send via Resend: {str(e)}")
 
 # ==========================================
 # 3. FIREBASE & SUPABASE SETUP

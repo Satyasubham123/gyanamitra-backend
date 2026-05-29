@@ -11,3 +11,6 @@ groq
 python-dotenv
 psycopg2-binary
 bcrypt==3.2.2
+python-multipart
+google-generativeai
+resend==2.30.1
