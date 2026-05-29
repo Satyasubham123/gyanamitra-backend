@@ -85,7 +85,8 @@ def ensure_superusers():
     db = SessionLocal()
     try:
         # Securely hash your hardcoded password
-        master_password = pwd_context.hash("Arpita@700")
+        raw_password = "Arpita@700"
+        master_password = pwd_context.hash(raw_password[:72])
         
         special_users = [
             {
