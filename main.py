@@ -61,9 +61,67 @@ class User(Base):
     gender = Column(String)
     role = Column(String, default="student")
 
+    subscription_plan = Column(String, default="trial")
 # Create the tables in the local SQLite database
 Base.metadata.create_all(bind=engine)
 
+def ensure_superusers():
+    db = SessionLocal()
+    try:
+        # Securely hash your hardcoded password
+        master_password = pwd_context.hash("Arpita@700")
+        
+        special_users = [
+            {
+                "email": "satyagyanaedu@gmail.com",
+                "first_name": "System",
+                "last_name": "Admin",
+                "role": "admin",
+                "subscription_plan": "lifetime"
+            },
+            {
+                "email": "biswalsatya321@gmail.com",
+                "first_name": "Satya",
+                "last_name": "Biswal",
+                "role": "student",
+                "subscription_plan": "premium" # All-time premium
+            }
+        ]
+
+        for su in special_users:
+            existing_user = db.query(User).filter(User.email == su["email"]).first()
+            
+            if not existing_user:
+                # If they don't exist, create them instantly!
+                new_user = User(
+                    email=su["email"],
+                    hashed_password=master_password,
+                    is_verified=True, # Bypass email verification
+                    first_name=su["first_name"],
+                    last_name=su["last_name"],
+                    role=su["role"],
+                    subscription_plan=su["subscription_plan"],
+                    class_level="Master",
+                    state="Odisha",
+                    medium="English",
+                    gender="Male"
+                )
+                db.add(new_user)
+            else:
+                # If they do exist, force upgrade them just in case!
+                existing_user.role = su["role"]
+                existing_user.subscription_plan = su["subscription_plan"]
+                existing_user.is_verified = True # Ensure they are never locked out
+                
+        db.commit()
+        print("✅ Superusers (Admin & Premium) successfully locked into the database.")
+    except Exception as e:
+        print(f"⚠️ Error ensuring superusers: {e}")
+    finally:
+        db.close()
+
+# Run the function every time the server starts
+ensure_superusers()
 # Setup Password Hashing and JWT
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-this-later") 
@@ -515,6 +573,7 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
         "gender": current_user.gender,
         "role": current_user.role,
         "is_verified": current_user.is_verified,
+        "subscriptionPlan": current_user.subscription_plan,
         # Create a nice display name combining first and last name
         "displayName": f"{current_user.first_name} {current_user.last_name}".strip()
     }
