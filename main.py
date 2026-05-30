@@ -66,6 +66,11 @@ class User(Base):
     role = Column(String, default="student")
     subscription_plan = Column(String, default="trial")
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # 🚀 NEW: Security tracking columns for Password Recovery
+    reset_attempts = Column(Integer, default=0)
+    last_reset_request = Column(DateTime, nullable=True)
+    reset_locked_until = Column(DateTime, nullable=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -144,9 +149,8 @@ ensure_superusers()
 
 
 # ==========================================
-# 2. EMAIL VERIFICATION HELPER (GMAIL SMTP)
+# 2. EMAIL VERIFICATION & RECOVERY HELPERS
 # ==========================================
-# Make sure you have 'import requests' at the top of your file!
 
 def send_verification_email(user_email: str, token: str):
     verify_link = f"https://satyagyana.web.app/verify?token={token}"
@@ -185,18 +189,49 @@ def send_verification_email(user_email: str, token: str):
     }
 
     try:
-        # We use a standard HTTPS request to bypass the SMTP firewall!
         response = requests.post(url, json=payload, headers=headers)
-        
         if response.status_code in [200, 201, 202]:
             print(f"✅ Real verification email securely dispatched to {user_email} via Brevo API")
             return True
         else:
             print(f"⚠️ Failed to send via Brevo API: {response.text}")
             return False
-            
     except Exception as e:
         print(f"⚠️ HTTP Request failed: {str(e)}")
+        return False
+
+def send_reset_email(user_email: str, token: str):
+    reset_link = f"https://satyagyana.web.app/reset-password?token={token}"
+    brevo_api_key = os.getenv("BREVO_API_KEY")
+    sender_email = os.getenv("GMAIL_ADDRESS")
+    
+    if not brevo_api_key or not sender_email:
+        return False
+
+    url = "https://api.brevo.com/v3/smtp/email"
+    headers = {"accept": "application/json", "api-key": brevo_api_key, "content-type": "application/json"}
+    
+    html_content = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+        <h2 style="color: #1e293b;">Recover Your Passkey</h2>
+        <p style="color: #475569; font-size: 16px;">We received a request to reset your password. Click below to securely create a new one. This link expires in 15 minutes.</p>
+        <br>
+        <a href='{reset_link}' style='display: inline-block; padding: 12px 24px; background-color: #8b5cf6; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;'>Reset Password</a>
+    </div>
+    """
+    
+    payload = {
+        "sender": {"name": "GyanMitra Security", "email": sender_email},
+        "to": [{"email": user_email}],
+        "subject": "GyanMitra Password Recovery",
+        "htmlContent": html_content
+    }
+    
+    try:
+        requests.post(url, json=payload, headers=headers)
+        return True
+    except Exception as e:
+        print(f"Failed to send reset email: {e}")
         return False
 
 
@@ -264,6 +299,13 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     email: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -356,7 +398,7 @@ async def register(user: UserCreate, db: Session = Depends(get_db)):
     expire = datetime.utcnow() + timedelta(hours=24)
     verify_token = jwt.encode({"sub": user.email, "type": "verify", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     
-    # Send the email via Gmail SMTP
+    # Send the email via Brevo
     send_verification_email(user.email, verify_token)
     
     return {"msg": "User registered successfully! Please check your email to verify your account."}
@@ -403,6 +445,76 @@ async def login(user: UserLogin, db: Session = Depends(get_db)):
     encoded_jwt = jwt.encode({"sub": user.email, "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     
     return {"access_token": encoded_jwt, "token_type": "bearer"}
+
+@app.post("/api/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    
+    if not user:
+        return {"message": "If that email exists, a recovery link has been dispatched."}
+
+    now = datetime.utcnow()
+
+    # 1. ENFORCE 24-HOUR BAN
+    if user.reset_locked_until and now < user.reset_locked_until:
+        hours_left = int((user.reset_locked_until - now).total_seconds() // 3600)
+        raise HTTPException(status_code=429, detail=f"SECURITY LOCKDOWN: Maximum attempts reached. Try again in {hours_left} hours.")
+
+    # Reset strikes if the ban has naturally expired
+    if user.reset_locked_until and now > user.reset_locked_until:
+        user.reset_attempts = 0
+        user.reset_locked_until = None
+
+    # 2. ENFORCE 1-HOUR COOLDOWN BETWEEN CLICKS
+    if user.last_reset_request and now < user.last_reset_request + timedelta(hours=1):
+        mins_left = int((user.last_reset_request + timedelta(hours=1) - now).total_seconds() // 60)
+        raise HTTPException(status_code=429, detail=f"COOLDOWN ACTIVE: Please wait {mins_left} minutes before requesting another link.")
+
+    # 3. LOG THE ATTEMPT
+    user.reset_attempts = (user.reset_attempts or 0) + 1
+    user.last_reset_request = now
+    
+    warning_msg = ""
+    # 4. CHECK IF THEY JUST HIT THE 5-ATTEMPT LIMIT
+    if user.reset_attempts >= 5:
+        user.reset_locked_until = now + timedelta(days=1)
+        warning_msg = " WARNING: You have hit the 5-attempt limit. Password recovery is now locked for 24 hours."
+    else:
+        attempts_left = 5 - user.reset_attempts
+        warning_msg = f" (Attempt {user.reset_attempts}/5. Please do not forget your password. {attempts_left} attempts remaining before 24-hour lockdown)."
+
+    db.commit()
+
+    # Create the token and send the email via Brevo
+    expire = now + timedelta(minutes=15)
+    reset_token = jwt.encode({"sub": user.email, "exp": expire, "type": "reset"}, SECRET_KEY, algorithm=ALGORITHM)
+    send_reset_email(user.email, reset_token)
+    
+    return {"message": f"Recovery link dispatched!{warning_msg}"}
+
+@app.post("/api/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(req.token, SECRET_KEY, algorithms=[ALGORITHM])
+        email = payload.get("sub")
+        if payload.get("type") != "reset" or email is None:
+            raise HTTPException(status_code=400, detail="Invalid recovery token.")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Token is expired or invalid. Please request a new one.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid verification link.")
+        
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+        
+    user.hashed_password = pwd_context.hash(req.new_password)
+    # Reset their strikes upon successful reset
+    user.reset_attempts = 0
+    user.reset_locked_until = None
+    db.commit()
+    
+    return {"message": "Passkey updated successfully! You can now log in."}
 
 @app.post("/api/dictionary/search")
 async def search_vocabulary(request: WordRequest):
