@@ -146,21 +146,25 @@ ensure_superusers()
 # ==========================================
 # 2. EMAIL VERIFICATION HELPER (GMAIL SMTP)
 # ==========================================
+# Make sure you have 'import requests' at the top of your file!
 
 def send_verification_email(user_email: str, token: str):
     verify_link = f"https://satyagyana.web.app/verify?token={token}"
     
-    sender_email = os.getenv("GMAIL_ADDRESS")
-    sender_password = os.getenv("GMAIL_APP_PASSWORD")
+    brevo_api_key = os.getenv("BREVO_API_KEY")
+    sender_email = os.getenv("GMAIL_ADDRESS") # This should be satyagyanaedu@gmail.com
 
-    if not sender_email or not sender_password:
-        print("⚠️ ERROR: GMAIL_ADDRESS or GMAIL_APP_PASSWORD missing from environment variables!")
+    if not brevo_api_key or not sender_email:
+        print("⚠️ ERROR: BREVO_API_KEY or GMAIL_ADDRESS missing from environment variables!")
         return False
 
-    msg = MIMEMultipart()
-    msg['From'] = f"GyanMitra <{sender_email}>"
-    msg['To'] = user_email
-    msg['Subject'] = "Verify your GyanMitra Access Node"
+    url = "https://api.brevo.com/v3/smtp/email"
+    
+    headers = {
+        "accept": "application/json",
+        "api-key": brevo_api_key,
+        "content-type": "application/json"
+    }
 
     html_content = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
@@ -172,17 +176,27 @@ def send_verification_email(user_email: str, token: str):
         <p style="color: #64748b; font-size: 12px;">Or paste this link securely into your browser:<br> {verify_link}</p>
     </div>
     """
-    msg.attach(MIMEText(html_content, 'html'))
+
+    payload = {
+        "sender": {"name": "GyanMitra", "email": sender_email},
+        "to": [{"email": user_email}],
+        "subject": "Verify your GyanMitra Access Node",
+        "htmlContent": html_content
+    }
 
     try:
-        # Securely connect to Gmail's server and send the email
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
-            server.login(sender_email, sender_password)
-            server.send_message(msg)
-            print(f"✅ Real verification email securely dispatched to {user_email} via Gmail")
+        # We use a standard HTTPS request to bypass the SMTP firewall!
+        response = requests.post(url, json=payload, headers=headers)
+        
+        if response.status_code in [200, 201, 202]:
+            print(f"✅ Real verification email securely dispatched to {user_email} via Brevo API")
             return True
+        else:
+            print(f"⚠️ Failed to send via Brevo API: {response.text}")
+            return False
+            
     except Exception as e:
-        print(f"⚠️ Failed to send via Gmail SMTP: {str(e)}")
+        print(f"⚠️ HTTP Request failed: {str(e)}")
         return False
 
 
